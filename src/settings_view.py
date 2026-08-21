@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -88,14 +89,25 @@ class SettingsView(QWidget):
 
         # 通用
         self.auto_start = QCheckBox("开机自启")
+        self.sound_check = QCheckBox("提示音")
         self.pet_name = QLineEdit()
         self.personality = QPlainTextEdit()
         self.personality.setFixedHeight(70)
         form.addRow("开机自启", self.auto_start)
+        form.addRow("提示音", self.sound_check)
         form.addRow("宠物名字", self.pet_name)
         form.addRow("性格要求", self.personality)
 
         outer.addLayout(form)
+
+        # 当前记忆
+        mem_box = QGroupBox("当前记忆")
+        mem_layout = QVBoxLayout(mem_box)
+        self.facts_list = QListWidget()
+        self.facts_list.setSelectionMode(QListWidget.NoSelection)
+        self.facts_list.setFixedHeight(110)
+        mem_layout.addWidget(self.facts_list)
+        outer.addWidget(mem_box)
 
         # 危险区
         clear_btn = QPushButton("清空全部记忆")
@@ -142,6 +154,7 @@ class SettingsView(QWidget):
         )
         self.eyes.setChecked(bool(self.cfg.get("eyes_open", True)))
         self.auto_start.setChecked(autostart.is_auto_start())
+        self.sound_check.setChecked(bool(self.cfg.get("sound_enabled", True)))
         self.pet_name.setText(self.cfg.get("pet_name", "Rant机"))
         self.personality.setPlainText(
             self.cfg.get(
@@ -149,6 +162,12 @@ class SettingsView(QWidget):
                 "毒舌但礼貌，不说脏话，不暴躁，偶尔吐槽用户屏幕上的内容",
             )
         )
+        self.refresh_facts()
+
+    def refresh_facts(self) -> None:
+        self.facts_list.clear()
+        for f in self.store.facts():
+            self.facts_list.addItem(f)
 
     def save(self) -> None:
         self.cfg.set("provider", self.provider_combo.currentData())
@@ -159,6 +178,7 @@ class SettingsView(QWidget):
         self.cfg.set("observe_interval_minutes", self.interval.value())
         self.cfg.set("comment_probability", self.probability.value() / 100.0)
         self.cfg.set("eyes_open", self.eyes.isChecked())
+        self.cfg.set("sound_enabled", self.sound_check.isChecked())
         self.cfg.set("pet_name", self.pet_name.text().strip() or "Rant机")
         self.cfg.set("personality", self.personality.toPlainText().strip())
 
@@ -179,4 +199,5 @@ class SettingsView(QWidget):
             == QMessageBox.Yes
         ):
             self.store.clear_all()
+            self.refresh_facts()
             self.memory_cleared.emit()

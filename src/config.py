@@ -78,6 +78,7 @@ DEFAULTS = {
     "comment_probability": 0.4,
     "auto_start": False,
     "eyes_open": True,
+    "sound_enabled": True,
     "window_x": None,
     "window_y": None,
     "personality": "毒舌但礼貌，不说脏话，不暴躁，偶尔吐槽用户屏幕上的内容",

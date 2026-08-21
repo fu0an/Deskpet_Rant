@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from config import Config
 from llm import prompts
 from llm.client import LLMClient, LLMError
+from pet.expressions import classify, split_emotion
 from .capture import capture_screen
 
 FALLBACK_LINES = [
@@ -25,8 +26,8 @@ FALLBACK_LINES = [
 
 
 class ScreenObserver(QObject):
-    comment_ready = Signal(str)
-    fallback_ready = Signal(str)
+    comment_ready = Signal(str, str)   # (文本, 情绪名)
+    fallback_ready = Signal(str, str)  # (文本, 情绪名)
 
     def __init__(self, cfg: Config, llm: LLMClient, parent=None):
         super().__init__(parent)
@@ -64,14 +65,19 @@ class ScreenObserver(QObject):
         try:
             jpeg = capture_screen()
             if jpeg is None:
-                self.fallback_ready.emit(random.choice(FALLBACK_LINES))
+                line = random.choice(FALLBACK_LINES)
+                self.fallback_ready.emit(line, classify(line).value)
                 return
             reply = self.llm.vision_chat(prompts.screen_comment_prompt(self.cfg), jpeg)
             if reply and reply != prompts.REPLY_NONE:
-                self.comment_ready.emit(reply)
+                text, expr = split_emotion(reply)
+                if text:
+                    self.comment_ready.emit(text, expr.value)
         except LLMError:
-            self.fallback_ready.emit(random.choice(FALLBACK_LINES))
+            line = random.choice(FALLBACK_LINES)
+            self.fallback_ready.emit(line, classify(line).value)
         except Exception:  # noqa: BLE001
-            self.fallback_ready.emit(random.choice(FALLBACK_LINES))
+            line = random.choice(FALLBACK_LINES)
+            self.fallback_ready.emit(line, classify(line).value)
         finally:
             self._busy = False

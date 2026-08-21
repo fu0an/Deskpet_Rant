@@ -51,7 +51,7 @@ QTextBrowser::viewport { background: transparent; }
 
 
 class ChatView(QWidget):
-    reply_ready = Signal(str)
+    reply_ready = Signal(str, str)  # (文本, 情绪名)
 
     def __init__(self, engine, parent=None):
         super().__init__(parent)
@@ -118,14 +118,14 @@ class ChatView(QWidget):
 
     def _work(self, text: str) -> None:
         try:
-            reply = self.engine.ask(text)
+            reply, emotion = self.engine.ask(text)
         except LLMError as e:
-            reply = str(e)
+            reply, emotion = str(e), "speechless"
         except Exception as e:  # noqa: BLE001
-            reply = f"（出错啦：{e}）"
-        self.reply_ready.emit(reply)
+            reply, emotion = f"（出错啦：{e}）", "speechless"
+        self.reply_ready.emit(reply, emotion)
 
-    def _on_reply(self, reply: str) -> None:
+    def _on_reply(self, reply: str, emotion: str) -> None:
         self.append_assistant(reply)
         self._set_busy(False)
         self.input.setFocus()
@@ -142,6 +142,7 @@ class MainDialog(QWidget):
     eyes_toggled = Signal(bool)
     memory_cleared = Signal()
     settings_saved = Signal()
+    assistant_replied = Signal(str, str)  # (文本, 情绪名)
 
     def __init__(
         self,
@@ -205,6 +206,7 @@ class MainDialog(QWidget):
 
         self.chat_view = ChatView(self.engine)
         self.chat_view.set_status(self._status_text())
+        self.chat_view.reply_ready.connect(self.assistant_replied)
         self.stacked.addWidget(self.chat_view)
 
         self.settings_view = SettingsView(self.cfg, self.store)
@@ -231,7 +233,9 @@ class MainDialog(QWidget):
 
     def _on_gear(self, checked: bool) -> None:
         self.stacked.setCurrentIndex(PAGE_SETTINGS if checked else PAGE_CHAT)
-        if not checked:
+        if checked:
+            self.settings_view.refresh_facts()
+        else:
             self.chat_view.set_status(self._status_text())
             self.chat_view.input.setFocus()
 

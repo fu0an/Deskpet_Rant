@@ -2,7 +2,7 @@
 
 import sys
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -12,9 +12,11 @@ from config import Config
 from llm.client import LLMClient
 from memory.store import MemoryStore
 from pet.bubble import Bubble
+from pet.expressions import EXPR_BY_NAME, ExpressionController
 from pet.pet_window import PetWindow
 from pet.sprite import Expression, SpriteRenderer
 from vision.screen_observer import ScreenObserver
+from sound import play as play_sound, set_enabled as set_sound_enabled
 
 
 def main() -> int:
@@ -38,9 +40,8 @@ def main() -> int:
     dialog = MainDialog(cfg, engine, store, pet)
     observer = ScreenObserver(cfg, llm)
     bubble = Bubble()
-
-    def default_expression() -> Expression:
-        return Expression.NORMAL if pet.eyes_open else Expression.CLOSED
+    expressions = ExpressionController(pet)
+    set_sound_enabled(bool(cfg.get("sound_enabled", True)))
 
     def apply_eyes(open_: bool) -> None:
         pet.set_eyes_open(open_)
@@ -66,18 +67,28 @@ def main() -> int:
     dialog.memory_cleared.connect(store.clear_all)
     dialog.settings_saved.connect(observer.restart)
 
-    # --- 屏幕观察 → 气泡 + 表情 ---
-    def show_bubble(text: str, funny: bool = True) -> None:
+    def on_settings_saved() -> None:
+        observer.restart()
+        set_sound_enabled(bool(cfg.get("sound_enabled", True)))
+
+    dialog.settings_saved.connect(on_settings_saved)
+
+    def show_bubble(text: str, emotion: str) -> None:
         bubble.show_comment(text)
         bubble.anchor_above(pet.geometry().center(), pet.screen())
-        if funny:
-            pet.set_expression(Expression.HAPPY)
-            QTimer.singleShot(
-                2500, lambda: pet.set_expression(default_expression())
-            )
+        expr = EXPR_BY_NAME.get(emotion, Expression.NORMAL)
+        expressions.show(expr, 2500)
+        play_sound(emotion)
 
-    observer.comment_ready.connect(lambda t: show_bubble(t, funny=True))
-    observer.fallback_ready.connect(lambda t: show_bubble(t, funny=False))
+    observer.comment_ready.connect(show_bubble)
+    observer.fallback_ready.connect(show_bubble)
+
+    def on_assistant_reply(text: str, emotion: str) -> None:
+        expr = EXPR_BY_NAME.get(emotion, Expression.NORMAL)
+        expressions.show(expr, 4000)
+        play_sound(emotion)
+
+    dialog.assistant_replied.connect(on_assistant_reply)
 
     if cfg.get("eyes_open", True):
         observer.start()
@@ -118,6 +129,7 @@ def main() -> int:
     # --- 退出清理 ---
     def on_quit() -> None:
         observer.stop()
+        engine.summarizer.run()  # 退出时补一次记忆整理（尽力而为）
         cfg.set("window_x", pet.x())
         cfg.set("window_y", pet.y())
         store.close()
