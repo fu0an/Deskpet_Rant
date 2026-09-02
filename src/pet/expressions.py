@@ -21,15 +21,21 @@ SPEECHLESS_WORDS = [
     "摆烂", "摸鱼", "困", "累", "沉默", "受够", "看不下去", "无聊", "没眼看",
     "扶额", "挠头", "不想说",
 ]
+PUZZLED_WORDS = [
+    "好奇", "疑惑", "奇怪", "什么鬼", "怎么回事", "咋回事", "干嘛",
+    "为什么", "搞不懂", "不明白",
+]
 
 EXPR_BY_NAME = {
     "happy": Expression.HAPPY,
     "normal": Expression.NORMAL,
     "speechless": Expression.SPEECHLESS,
+    "puzzled": Expression.PUZZLED,
+    "curious": Expression.PUZZLED,
 }
 
 _EMOTION_RE = re.compile(
-    r'\{\s*"emotion"\s*:\s*"(happy|normal|speechless)"'
+    r'\{\s*"emotion"\s*:\s*"(happy|normal|speechless|puzzled)"'
     r'(?:\s*,\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)")?\s*\}'
 )
 
@@ -43,6 +49,9 @@ def classify(text: str) -> Expression:
     for w in HAPPY_WORDS:
         if w in text:
             return Expression.HAPPY
+    for w in PUZZLED_WORDS:
+        if w in text:
+            return Expression.PUZZLED
     if text.count("？") >= 2 or text.count("?") >= 2:
         return Expression.SPEECHLESS
     if "……" in text or "..." in text:

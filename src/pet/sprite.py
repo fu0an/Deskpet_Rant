@@ -1,41 +1,53 @@
-"""Rant机 像素形象：程序化绘制，虚线边框小方块 + 像素表情。
+"""Rant机 像素形象：从项目根目录 pictures/ 加载像素画，按表情切换图片。
 
-表情：
-- NORMAL      常规：方形眼
-- HAPPY       开心/害羞：八字眯眼 + 腮红
-- SPEECHLESS  无语：一字型眯眼 + 流汗
-- CLOSED      闭眼：一字型眯眼
-嘴巴始终一字型。
+表情（对应 pictures/ 下的 PNG，均为 24x24）：
+- NORMAL      常规：rantRobert_normal.png
+- HAPPY       开心/害羞：rantRobert_happyORshy.png
+- SPEECHLESS  无语：rantRobert_haveNOwords.png
+- PUZZLED     疑惑/好奇：rantRobert_puzzledORcurious.png
+- CLOSED      闭眼：rantRobert_eyesClosed.png
 """
 
 import enum
+import sys
+from pathlib import Path
 
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QPixmap
 
 GRID = 16  # 逻辑像素网格（16x16）
-
-COLOR_BODY = "#3b4252"
-COLOR_BORDER = "#d8dee9"
-COLOR_EYE = "#eceff4"
-COLOR_BLUSH = "#f2a0b0"
-COLOR_SWEAT = "#7fd4f7"
 
 
 class Expression(enum.Enum):
     NORMAL = "normal"
     HAPPY = "happy"
     SPEECHLESS = "speechless"
+    PUZZLED = "puzzled"
     CLOSED = "closed"
 
 
-def _fill(p: QPainter, cell: int, x: int, y: int, w: int, h: int, color: str) -> None:
-    p.fillRect(QRect(x * cell, y * cell, w * cell, h * cell), QColor(color))
+EXPRESSION_FILES = {
+    Expression.NORMAL: "rantRobert_normal.png",
+    Expression.HAPPY: "rantRobert_happyORshy.png",
+    Expression.SPEECHLESS: "rantRobert_haveNOwords.png",
+    Expression.PUZZLED: "rantRobert_puzzledORcurious.png",
+    Expression.CLOSED: "rantRobert_eyesClosed.png",
+}
+
+
+def _pictures_dir() -> Path:
+    """素材目录：打包后从 PyInstaller 数据目录读取，开发时取项目根目录。"""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parents[2]
+    return base / "pictures"
 
 
 class SpriteRenderer:
     def __init__(self, cell: int = 6):
         self.cell = cell
+        self._cache: dict[Expression, QPixmap] = {}
 
     def logical_size(self) -> int:
         return GRID * self.cell
@@ -43,7 +55,6 @@ class SpriteRenderer:
     def render(self, expression: Expression, dpr: float = 1.0) -> QPixmap:
         # 在设置了 DPR 的 pixmap 上，QPainter 使用逻辑坐标；
         # 物理分辨率由 pixmap 尺寸与 DPR 负责，绘制坐标一律用逻辑值。
-        cell = self.cell
         size = self.logical_size()
         phys = int(round(size * dpr))
         pm = QPixmap(phys, phys)
@@ -51,49 +62,18 @@ class SpriteRenderer:
         pm.fill(Qt.transparent)
 
         p = QPainter(pm)
+        # 像素画要求最近邻缩放，保证锐利无混叠
         p.setRenderHint(QPainter.Antialiasing, False)
-
-        # 身体
-        p.fillRect(0, 0, size, size, QColor(COLOR_BODY))
-
-        # 虚线边框
-        pen = QPen(QColor(COLOR_BORDER))
-        pen.setStyle(Qt.DashLine)
-        pen.setWidth(max(2, round(cell / 2)))
-        p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        inset = pen.width() // 2
-        p.drawRect(QRect(inset, inset, size - 2 * inset, size - 2 * inset))
-
-        # 眼睛
-        if expression is Expression.NORMAL:
-            _fill(p, cell, 4, 6, 3, 2, COLOR_EYE)
-            _fill(p, cell, 10, 6, 3, 2, COLOR_EYE)
-        elif expression is Expression.HAPPY:
-            # 八字眯眼（^ ^）：斜向两格组成
-            _fill(p, cell, 4, 7, 1, 1, COLOR_EYE)
-            _fill(p, cell, 5, 6, 1, 1, COLOR_EYE)
-            _fill(p, cell, 6, 7, 1, 1, COLOR_EYE)
-            _fill(p, cell, 9, 7, 1, 1, COLOR_EYE)
-            _fill(p, cell, 10, 6, 1, 1, COLOR_EYE)
-            _fill(p, cell, 11, 7, 1, 1, COLOR_EYE)
-            # 腮红
-            _fill(p, cell, 2, 9, 2, 1, COLOR_BLUSH)
-            _fill(p, cell, 12, 9, 2, 1, COLOR_BLUSH)
-        elif expression is Expression.SPEECHLESS:
-            # 一字型眯眼
-            _fill(p, cell, 4, 6, 3, 1, COLOR_EYE)
-            _fill(p, cell, 10, 6, 3, 1, COLOR_EYE)
-            # 流汗（右侧小水滴）
-            _fill(p, cell, 13, 3, 1, 1, COLOR_SWEAT)
-            _fill(p, cell, 13, 4, 1, 1, COLOR_SWEAT)
-            _fill(p, cell, 12, 4, 1, 1, COLOR_SWEAT)
-        else:  # CLOSED
-            _fill(p, cell, 4, 6, 3, 1, COLOR_EYE)
-            _fill(p, cell, 10, 6, 3, 1, COLOR_EYE)
-
-        # 嘴巴：一字型，始终不变
-        _fill(p, cell, 7, 11, 3, 1, COLOR_EYE)
-
+        p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+        p.drawPixmap(0, 0, size, size, self._source(expression))
         p.end()
         return pm
+
+    def _source(self, expression: Expression) -> QPixmap:
+        if expression not in self._cache:
+            pm = QPixmap(str(_pictures_dir() / EXPRESSION_FILES[expression]))
+            if pm.isNull():
+                pm = QPixmap(GRID, GRID)
+                pm.fill(Qt.transparent)
+            self._cache[expression] = pm
+        return self._cache[expression]

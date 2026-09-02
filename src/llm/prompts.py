@@ -9,8 +9,8 @@ REPLY_NONE = "【无】"
 
 EMOTION_NOTE = (
     "每次回复末尾附加一行情绪标签，严格格式为 JSON："
-    '{"emotion":"happy|normal|speechless"}，'
-    "happy 表示开心/害羞，normal 表示平静，speechless 表示无语。"
+    '{"emotion":"happy|normal|speechless|puzzled"}，'
+    "happy 表示开心/害羞，normal 表示平静，speechless 表示无语，puzzled 表示疑惑/好奇。"
     "不要把 JSON 放进对话内容里，只放在最后单独一行。"
 )
 
@@ -46,8 +46,8 @@ def screen_comment_prompt(cfg) -> str:
         f"以你的口吻写一句简短的吐槽/评价/闲聊（中文，20 字以内）。"
         f"性格：{personality}。不骂人、不说脏话。"
         "输出必须是 JSON，格式为"
-        ' {"emotion":"happy|normal|speechless","text":"吐槽内容"}，'
-        "emotion 表示你此刻的情绪（happy 开心/害羞，normal 平静，speechless 无语）。"
+        ' {"emotion":"happy|normal|speechless|puzzled","text":"吐槽内容"}，'
+        "emotion 表示你此刻的情绪（happy 开心/害羞，normal 平静，speechless 无语，puzzled 疑惑/好奇）。"
         f"如果屏幕上确实没什么值得说的，只回复：{REPLY_NONE}"
     )
 
