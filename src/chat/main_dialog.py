@@ -1,6 +1,7 @@
 """主对话框：贴着宠物弹出，左侧齿轮工具栏，聊天/设置双视图。"""
 
 import html
+import logging
 import threading
 
 from PySide6.QtCore import QEvent, Qt, Signal
@@ -121,8 +122,9 @@ class ChatView(QWidget):
             reply, emotion = self.engine.ask(text)
         except LLMError as e:
             reply, emotion = str(e), "speechless"
-        except Exception as e:  # noqa: BLE001
-            reply, emotion = f"（出错啦：{e}）", "speechless"
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("聊天出错")
+            reply, emotion = "（出错啦，我先懵一会儿…）", "speechless"
         self.reply_ready.emit(reply, emotion)
 
     def _on_reply(self, reply: str, emotion: str) -> None:

@@ -5,6 +5,7 @@
 - ExpressionController：统一管理表情切换与回默认的定时器
 """
 
+import json
 import re
 
 from PySide6.QtCore import QObject, QTimer
@@ -61,6 +62,39 @@ def classify(text: str) -> Expression:
     return Expression.NORMAL
 
 
+def _clean_json_scalar(s: str) -> str:
+    return s.replace("\\\"", '"').replace("\\\\", "\\")
+
+
+def _try_parse_object(text: str):
+    """从文本中抽取最外层 {...} 尝试 json 解析；失败返回 None。
+
+    兼容模型常见的不规范输出：前后有废话、键值用中文引号/全角逗号等。
+    """
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    chunk = text[start : end + 1]
+    for candidate in (
+        chunk,
+        chunk.replace("，", ",").replace("：", ":").replace("；", ";"),
+    ):
+        for pair in (
+            (chr(8220), '"'),  # “
+            (chr(8221), '"'),  # ”
+            (chr(8216), "'"),  # ‘
+            (chr(8217), "'"),  # ’
+        ):
+            candidate = candidate.replace(*pair)
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict):
+                return obj
+        except ValueError:
+            continue
+    return None
+
+
 def split_emotion(text: str) -> tuple[str, Expression]:
     """返回 (干净的文本, 表情)。解析不出 JSON 时整段文本按关键词兜底。"""
     if not text:
@@ -69,10 +103,21 @@ def split_emotion(text: str) -> tuple[str, Expression]:
     if m:
         emotion = EXPR_BY_NAME.get(m.group(1), Expression.NORMAL)
         if m.group(2) is not None:
-            clean = m.group(2).replace('\\"', '"').replace("\\\\", "\\")
+            clean = _clean_json_scalar(m.group(2))
             return clean, emotion
         clean = (text[: m.start()] + text[m.end() :]).strip()
         return clean, emotion
+    obj = _try_parse_object(text)
+    if obj is not None:
+        emotion = EXPR_BY_NAME.get(str(obj.get("emotion", "")), Expression.NORMAL)
+        body = obj.get("text")
+        clean = str(body).strip() if body is not None else ""
+        if clean:
+            return clean, emotion
+        # 有 emotion 没 text：把 JSON 去掉，剩文本按情绪返回
+        head, tail = text.find("{"), text.rfind("}")
+        remainder = (text[:head] + text[tail + 1 :]).strip()
+        return remainder, emotion
     return text, classify(text)
 
 

@@ -5,12 +5,15 @@
 - 失败时静默跳过，等下次再触发。
 """
 
+import logging
 import threading
 
 from config import Config
 from llm import prompts
 from llm.client import LLMClient
 from memory.store import MemoryStore
+
+log = logging.getLogger(__name__)
 
 MAX_FACTS = 30
 
@@ -47,6 +50,7 @@ class Summarizer:
             self.store.trim_facts(MAX_FACTS)
             return True
         except Exception:  # noqa: BLE001 失败静默跳过，下次再触发
+            log.exception("记忆整理失败")
             return False
         finally:
             with self._lock:

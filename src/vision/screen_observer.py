@@ -2,19 +2,24 @@
 
 - 闭眼时完全不截屏；
 - 每次按概率决定是否真正调用模型（省钱）；
-- 模型返回【无】或调用失败时不打扰用户（失败时用本地兜底语录）。
+- 模型返回【无】或调用失败时不打扰用户（失败时用本地兜底语录）；
+- 被内容审核拦截时给出专属文案并冷却一段时间，避免对同一画面反复上传。
 """
 
+import logging
 import random
 import threading
+import time
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from config import Config
 from llm import prompts
-from llm.client import LLMClient, LLMError
+from llm.client import ContentBlocked, LLMClient, LLMError
 from pet.expressions import classify, split_emotion
 from .capture import capture_screen
+
+log = logging.getLogger(__name__)
 
 FALLBACK_LINES = [
     "屏幕太安静了，是不是在摸鱼呀。",
@@ -23,6 +28,9 @@ FALLBACK_LINES = [
     "看不清楚屏幕，我先眯会儿。",
     "脑子（模型）还没接上线，先打个盹。",
 ]
+
+BLOCKED_LINE = "这个画面太敏感了，我装作没看见，先休息会儿。"
+BLOCK_COOLDOWN_S = 600  # 被审核拦截后这段时间不再发起识别
 
 
 class ScreenObserver(QObject):
@@ -34,6 +42,7 @@ class ScreenObserver(QObject):
         self.cfg = cfg
         self.llm = llm
         self._busy = False
+        self._blocked_until = 0.0
         self.timer = QTimer(self)
         self.timer.setSingleShot(False)
         self.timer.timeout.connect(self._tick)
@@ -55,6 +64,10 @@ class ScreenObserver(QObject):
             return
         if not self.cfg.get("api_key", "").strip():
             return
+        if not self.cfg.vision_model():  # 当前服务商不支持视觉，不必截屏
+            return
+        if time.time() < self._blocked_until:
+            return
         prob = float(self.cfg.get("comment_probability", 0.4))
         if random.random() > prob:
             return
@@ -73,10 +86,15 @@ class ScreenObserver(QObject):
                 text, expr = split_emotion(reply)
                 if text:
                     self.comment_ready.emit(text, expr.value)
-        except LLMError:
+        except ContentBlocked:
+            self._blocked_until = time.time() + BLOCK_COOLDOWN_S
+            self.fallback_ready.emit(BLOCKED_LINE, "speechless")
+        except LLMError as e:
+            log.warning("屏幕识别失败：%s", e)
             line = random.choice(FALLBACK_LINES)
             self.fallback_ready.emit(line, classify(line).value)
         except Exception:  # noqa: BLE001
+            log.exception("屏幕识别发生未预期异常")
             line = random.choice(FALLBACK_LINES)
             self.fallback_ready.emit(line, classify(line).value)
         finally:

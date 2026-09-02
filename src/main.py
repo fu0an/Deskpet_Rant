@@ -1,7 +1,9 @@
 """DeskpetRant 入口：Rant机 桌宠。"""
 
 import sys
+import threading
 
+import applog
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -15,17 +17,23 @@ from pet.bubble import Bubble
 from pet.expressions import EXPR_BY_NAME, ExpressionController
 from pet.pet_window import PetWindow
 from pet.sprite import Expression, SpriteRenderer
+from single_instance import SingleInstance
 from vision.screen_observer import ScreenObserver
 from sound import play as play_sound, set_enabled as set_sound_enabled
 
 
 def main() -> int:
+    applog.setup_logging()
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
     app.setApplicationName("DeskpetRant")
     app.setQuitOnLastWindowClosed(False)
+
+    guard = SingleInstance()
+    if not guard.try_acquire():
+        return 0  # 已有实例在运行，直接退出
 
     cfg = Config()
     store = MemoryStore()
@@ -68,6 +76,7 @@ def main() -> int:
     dialog.settings_saved.connect(observer.restart)
 
     def on_settings_saved() -> None:
+        llm.reset()  # 切换服务商/API key 后丢弃旧客户端
         observer.restart()
         set_sound_enabled(bool(cfg.get("sound_enabled", True)))
 
@@ -124,12 +133,23 @@ def main() -> int:
     )
     tray.show()
 
+    # 再次启动程序时，把已有实例唤起到前台而不是再开一个
+    def show_primary() -> None:
+        pet.show()
+        pet.raise_()
+        pet.activateWindow()
+
+    guard.activated.connect(show_primary)
+
     pet.show()
 
     # --- 退出清理 ---
     def on_quit() -> None:
         observer.stop()
-        engine.summarizer.run()  # 退出时补一次记忆整理（尽力而为）
+        # 退出时补一次记忆整理：后台线程做，最多等 2 秒，不阻塞退出
+        t = threading.Thread(target=engine.summarizer.run, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
         cfg.set("window_x", pet.x())
         cfg.set("window_y", pet.y())
         store.close()
