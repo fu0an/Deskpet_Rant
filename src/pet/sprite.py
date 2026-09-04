@@ -6,6 +6,8 @@
 - SPEECHLESS  无语：rantRobert_haveNOwords.png
 - PUZZLED     疑惑/好奇：rantRobert_puzzledORcurious.png
 - CLOSED      闭眼：rantRobert_eyesClosed.png
+- EXCITED_RESTLESS  兴奋/烦躁：rantRobert_excitedORrestless.png
+- BLINK       眨眼（复用闭眼帧做短暂闪眨）
 """
 
 import enum
@@ -24,6 +26,8 @@ class Expression(enum.Enum):
     SPEECHLESS = "speechless"
     PUZZLED = "puzzled"
     CLOSED = "closed"
+    EXCITED_RESTLESS = "excitedORrestless"
+    BLINK = "blink"
 
 
 EXPRESSION_FILES = {
@@ -32,6 +36,8 @@ EXPRESSION_FILES = {
     Expression.SPEECHLESS: "rantRobert_haveNOwords.png",
     Expression.PUZZLED: "rantRobert_puzzledORcurious.png",
     Expression.CLOSED: "rantRobert_eyesClosed.png",
+    Expression.EXCITED_RESTLESS: "rantRobert_excitedORrestless.png",
+    Expression.BLINK: "rantRobert_eyesClosed.png",
 }
 
 

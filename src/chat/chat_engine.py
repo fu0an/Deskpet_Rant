@@ -27,8 +27,14 @@ class ChatEngine:
             "content": prompts.system_prompt(self.cfg, self.store.facts()),
         }
 
-    def ask(self, user_text: str) -> tuple[str, str]:
-        """返回 (回复文本, 情绪名 happy|normal|speechless)。"""
+    def ask(self, user_text: str, quote: str | None = None) -> tuple[str, str]:
+        """返回 (回复文本, 情绪名 happy|normal|speechless)。
+
+        quote 非空时：把被引用的宠物原话先记为一条 assistant 消息，再记用户消息，
+        让模型能接着那句（吐槽/闲聊）的语境回复；引用的句子也顺带进入本地记忆。
+        """
+        if quote:
+            self.store.add_message("assistant", quote)
         self.store.add_message("user", user_text)
         messages = [self._system()]
         for role, content in self.store.recent_messages(10):

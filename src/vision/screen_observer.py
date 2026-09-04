@@ -56,6 +56,23 @@ class ScreenObserver(QObject):
     def stop(self) -> None:
         self.timer.stop()
 
+    def observe_now(self) -> bool:
+        """用户主动要求“再说一句”：立即发起一次识别吐槽，不受随机概率限制。
+
+        与定时触发共用后台线程；睁眼/已配 key/服务商支持视觉时才真正发起，
+        否则返回 False（由调用方给本地兜底）。返回 True 表示已发起。
+        """
+        if self._busy:
+            return False
+        if not self.cfg.get("eyes_open", True):
+            return False
+        if not self.cfg.get("api_key", "").strip():
+            return False
+        if not self.cfg.vision_model():
+            return False
+        self._start_run()
+        return True
+
     def _interval_ms(self) -> int:
         return max(1, int(self.cfg.get("observe_interval_minutes", 3))) * 60 * 1000
 
@@ -71,6 +88,9 @@ class ScreenObserver(QObject):
         prob = float(self.cfg.get("comment_probability", 0.4))
         if random.random() > prob:
             return
+        self._start_run()
+
+    def _start_run(self) -> None:
         self._busy = True
         threading.Thread(target=self._run, daemon=True).start()
 

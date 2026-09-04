@@ -1,4 +1,8 @@
-"""吐槽气泡：宠物附近的浮动文本，过一段时间自动淡出消失。"""
+"""吐槽气泡：宠物附近的浮动文本，过一段时间自动淡出消失。
+
+点击气泡不会只是关闭：会把这条内容带出去（reply_requested），由外部决定
+是否打开对话框引用它继续聊。
+"""
 
 from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtGui import QPainter, QPainterPath, QPen
@@ -14,6 +18,7 @@ BUBBLE_MAX_WIDTH = 260
 
 class Bubble(QWidget):
     dismissed = Signal()
+    reply_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -45,6 +50,7 @@ class Bubble(QWidget):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._start_fade)
         self._dismissed = False
+        self._text = ""
 
     def paintEvent(self, event):  # noqa: N802
         p = QPainter(self)
@@ -60,6 +66,7 @@ class Bubble(QWidget):
 
     def show_comment(self, text: str, duration_ms: int = 6000) -> None:
         self._dismissed = False
+        self._text = text
         self._opacity.setOpacity(1.0)
         self._label.setText(text)
         self._label.adjustSize()
@@ -102,4 +109,5 @@ class Bubble(QWidget):
         if not self._dismissed:
             self._dismissed = True
             self.dismissed.emit()
+        self.reply_requested.emit(self._text)
         event.accept()

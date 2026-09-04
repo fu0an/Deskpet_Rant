@@ -1,6 +1,7 @@
 """程序合成复古提示音，运行时生成，零素材依赖。
 
-三种：happy（上扬）、speechless（低平）、normal（轻快啵）。
+四种：happy（上扬）、speechless（低平）、normal（轻快啵）、
+annoyed（低音下行，被反复拨弄烦躁时用）。
 Windows 用 winsound 异步播放；其它平台静默跳过。
 """
 
@@ -51,6 +52,7 @@ _SOUNDS = {
     "happy": _synth([660, 990], 130),
     "speechless": _synth([220], 150),
     "normal": _synth([523, 392], 110),
+    "annoyed": _synth([392, 294, 196], 220),
 }
 
 _SOUND_FILES: dict[str, str] = {}

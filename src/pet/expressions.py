@@ -2,15 +2,21 @@
 
 - split_emotion(text)：解析模型返回的 {"emotion":..., "text":...}；解析失败用关键词兜底
 - classify(text)：本地关键词判定情绪
-- ExpressionController：统一管理表情切换与回默认的定时器
+- ExpressionController：统一管理表情切换与回默认的定时器；清醒时偶尔自动眨眼；
+  被反复拨弄时 show_annoyed() 无论睁闭眼都露烦躁脸，结束后回到对应状态。
 """
 
 import json
+import random
 import re
 
 from PySide6.QtCore import QObject, QTimer
 
 from .sprite import Expression
+
+BLINK_MIN_MS = 3000   # 眨眼最小间隔
+BLINK_MAX_MS = 9000   # 眨眼最大间隔
+BLINK_LEN_MS = 130    # 单次眨眼时长
 
 HAPPY_WORDS = [
     "哈哈", "嘻嘻", "嘿嘿", "开心", "高兴", "不错", "好耶", "厉害", "棒",
@@ -122,7 +128,11 @@ def split_emotion(text: str) -> tuple[str, Expression]:
 
 
 class ExpressionController(QObject):
-    """按展示内容切换表情，并在若干秒后回到默认表情。闭眼时不切换。"""
+    """按展示内容切换表情，并在若干秒后回到当前状态对应的默认表情。
+
+    - 闭眼睡觉时 show() 不切换（保持安静），但眨眼/烦躁不在此限；
+    - revert() 会按眼睛状态回到 NORMAL（睁眼）或 CLOSED（闭眼）。
+    """
 
     def __init__(self, pet, parent=None):
         super().__init__(parent)
@@ -131,12 +141,42 @@ class ExpressionController(QObject):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.revert)
 
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setSingleShot(True)
+        self._blink_timer.timeout.connect(self._do_blink)
+
     def show(self, expression: Expression, revert_ms: int = 2500) -> None:
         if not self.pet.eyes_open:
             return
         self.pet.set_expression(expression)
         self._timer.start(revert_ms)
 
+    def show_annoyed(self, revert_ms: int = 2800) -> None:
+        """被反复拨弄：无论睁闭眼都露烦躁脸，结束后回到对应状态。"""
+        self._timer.stop()
+        self.pet.set_expression(Expression.EXCITED_RESTLESS)
+        self._timer.start(revert_ms)
+
     def revert(self) -> None:
-        if self.pet.eyes_open:
+        self.pet.set_expression(
+            Expression.NORMAL if self.pet.eyes_open else Expression.CLOSED
+        )
+
+    # --- 自动眨眼（清醒空闲时）---
+
+    def start_blinking(self) -> None:
+        self._blink_timer.stop()
+        self._schedule_blink()
+
+    def _schedule_blink(self) -> None:
+        self._blink_timer.start(random.randint(BLINK_MIN_MS, BLINK_MAX_MS))
+
+    def _do_blink(self) -> None:
+        if self.pet.eyes_open and self.pet.expression is Expression.NORMAL:
+            self.pet.set_expression(Expression.BLINK)
+            QTimer.singleShot(BLINK_LEN_MS, self._unblink)
+        self._schedule_blink()
+
+    def _unblink(self) -> None:
+        if self.pet.expression is Expression.BLINK:
             self.pet.set_expression(Expression.NORMAL)

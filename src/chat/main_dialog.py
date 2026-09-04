@@ -48,16 +48,22 @@ QTextBrowser::viewport { background: transparent; }
 #sendButton { background: #3b82f6; border: none; border-radius: 8px;
               color: white; padding: 6px 14px; }
 #sendButton:disabled { background: #475569; }
+#quoteBar { background: #2f3542; border: 1px solid #3a4150; border-radius: 8px; }
+#quoteText { color: #8a93a5; font-size: 12px; }
 """
 
 
 class ChatView(QWidget):
     reply_ready = Signal(str, str)  # (文本, 情绪名)
 
+    QUOTE_MAX = 42  # 引用条预览长度上限
+
     def __init__(self, engine, parent=None):
         super().__init__(parent)
         self.engine = engine
         self._busy = False
+        self._quote: str | None = None
+        self._msgs: list[tuple[str, str]] = []  # 会话内 (role, text) 镜像
         self._build()
 
     def _build(self) -> None:
@@ -70,11 +76,29 @@ class ChatView(QWidget):
 
         self.view = QTextBrowser()
         self.view.setOpenExternalLinks(False)
+        self.view.setOpenLinks(False)
         self.view.document().setDefaultStyleSheet(
-            "p{margin:2px 0;} span.b{margin:2px 0;}"
+            "p{margin:2px 0;} a{color:#eceff4;text-decoration:none;}"
         )
+        self.view.anchorClicked.connect(self._on_anchor)
         self.view.setMinimumHeight(200)
         v.addWidget(self.view, 1)
+
+        self.quote_bar = QWidget()
+        self.quote_bar.setObjectName("quoteBar")
+        q = QHBoxLayout(self.quote_bar)
+        q.setContentsMargins(8, 4, 4, 4)
+        q.setSpacing(4)
+        self.quote_label = QLabel()
+        self.quote_label.setObjectName("quoteText")
+        q.addWidget(self.quote_label, 1)
+        self.quote_clear = QToolButton()
+        self.quote_clear.setText("\u2715")
+        self.quote_clear.setToolTip("取消引用")
+        self.quote_clear.clicked.connect(self._clear_quote)
+        q.addWidget(self.quote_clear)
+        v.addWidget(self.quote_bar)
+        self.quote_bar.hide()
 
         row = QHBoxLayout()
         self.input = QLineEdit()
@@ -92,34 +116,87 @@ class ChatView(QWidget):
     def set_status(self, text: str) -> None:
         self.status.setText(text)
 
-    def _bubble(self, text: str, mine: bool) -> str:
+    def _append_bubble(self, role: str, text: str) -> None:
+        idx = len(self._msgs)
+        self._msgs.append((role, text))
+        mine = role == "user"
         color = "#3b82f6" if mine else "#3a4150"
         align = "right" if mine else "left"
-        t = html.escape(text).replace("\n", "<br>")
-        return (
-            f'<p style="text-align:{align}"><span style="background:{color};'
-            f'border-radius:10px;padding:6px 10px;display:inline-block;'
-            f'max-width:240px;word-wrap:break-word;">{t}</span></p>'
+        body = html.escape(text).replace("\n", "<br>")
+        span = (
+            f'<span style="background:{color};border-radius:10px;'
+            f'padding:6px 10px;display:inline-block;max-width:240px;'
+            f'word-wrap:break-word;">{body}</span>'
         )
+        if role == "assistant":
+            span = (
+                f'<a style="color:#eceff4;text-decoration:none;" '
+                f'href="petreply://q/{idx}">{span}</a>'
+            )
+        self.view.append(f'<p style="text-align:{align}">{span}</p>')
 
     def append_user(self, text: str) -> None:
-        self.view.append(self._bubble(text, mine=True))
+        self._append_bubble("user", text)
 
     def append_assistant(self, text: str) -> None:
-        self.view.append(self._bubble(text, mine=False))
+        self._append_bubble("assistant", text)
+
+    def append_taunt(self, text: str) -> None:
+        """吐槽自动收进聊天记录（会话内可见），与最后一条相同则不重复。"""
+        if self._msgs and self._msgs[-1] == ("assistant", text):
+            return
+        self._append_bubble("assistant", text)
+
+    def begin_quoted_reply(self, text: str) -> None:
+        """点吐槽气泡进来：把它显示为一条宠物消息并设为待引用。"""
+        text = (text or "").strip()
+        if not text:
+            return
+        if not (self._msgs and self._msgs[-1] == ("assistant", text)):
+            self._append_bubble("assistant", text)
+        self._set_quote(text)
+
+    def _set_quote(self, text: str) -> None:
+        self._quote = text
+        preview = (
+            text if len(text) <= self.QUOTE_MAX else text[: self.QUOTE_MAX] + "…"
+        )
+        self.quote_label.setText(f"引用：{preview}")
+        self.quote_bar.show()
+        if not self._busy:
+            self.input.setFocus()
+
+    def _clear_quote(self) -> None:
+        self._quote = None
+        self.quote_bar.hide()
+        if not self._busy:
+            self.input.setFocus()
+
+    def _on_anchor(self, url) -> None:  # 点击历史里的宠物消息 → 引用它
+        raw = url.path().strip("/")
+        if not raw:
+            raw = url.host()
+        try:
+            idx = int(raw)
+        except (TypeError, ValueError):
+            return
+        if 0 <= idx < len(self._msgs) and self._msgs[idx][0] == "assistant":
+            self._set_quote(self._msgs[idx][1])
 
     def send(self) -> None:
         text = self.input.text().strip()
         if not text or self._busy:
             return
+        quote, self._quote = self._quote, None
+        self.quote_bar.hide()
         self.append_user(text)
         self.input.clear()
         self._set_busy(True)
-        threading.Thread(target=self._work, args=(text,), daemon=True).start()
+        threading.Thread(target=self._work, args=(text, quote), daemon=True).start()
 
-    def _work(self, text: str) -> None:
+    def _work(self, text: str, quote: str | None) -> None:
         try:
-            reply, emotion = self.engine.ask(text)
+            reply, emotion = self.engine.ask(text, quote=quote)
         except LLMError as e:
             reply, emotion = str(e), "speechless"
         except Exception:  # noqa: BLE001
@@ -229,6 +306,9 @@ class MainDialog(QWidget):
 
     def update_status(self) -> None:
         self.chat_view.set_status(self._status_text())
+
+    def begin_quoted_reply(self, text: str) -> None:
+        self.chat_view.begin_quoted_reply(text)
 
     def _on_settings_saved(self) -> None:
         self.update_status()

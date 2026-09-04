@@ -1,7 +1,9 @@
 """DeskpetRant 入口：Rant机 桌宠。"""
 
+import random
 import sys
 import threading
+import time
 
 import applog
 from PySide6.QtCore import Qt
@@ -20,6 +22,29 @@ from pet.sprite import Expression, SpriteRenderer
 from single_instance import SingleInstance
 from vision.screen_observer import ScreenObserver
 from sound import play as play_sound, set_enabled as set_sound_enabled
+
+# --- 互动相关常量 ---
+EYE_TOGGLE_WINDOW_S = 4.0   # 睁/闭眼拨弄判定时间窗（秒）
+EYE_TOGGLE_THRESHOLD = 3    # 时间窗内睁闭眼次数达到即烦躁
+ANNOY_COOLDOWN_S = 8.0      # 烦躁反应冷却（秒）
+ANNOY_LINE = "到底要怎样啦！"
+POKE_COOLDOWN_S = 4.0       # 戳一戳冷却（秒）
+POKE_LINES = [
+    "别戳啦，痒～",
+    "嘿嘿，干嘛啦",
+    "再戳我要咬人了哦。",
+    "呜……我只是个小方块。",
+]
+SLEEPY_POKE_LINES = [
+    "呼……（睡得正香）",
+    "ZZZ……别闹。",
+    "唔……还没睡醒……",
+]
+TALK_NOW_LINES = [
+    "（此刻没什么好吐槽的）",
+    "我在呢，你说～",
+    "屏幕太无聊了，我先躺会儿。",
+]
 
 
 def main() -> int:
@@ -51,6 +76,11 @@ def main() -> int:
     expressions = ExpressionController(pet)
     set_sound_enabled(bool(cfg.get("sound_enabled", True)))
 
+    # --- 互动状态 ---
+    _annoy_until = 0.0
+    _poke_until = 0.0
+    _eye_toggles: list[float] = []
+
     def apply_eyes(open_: bool) -> None:
         pet.set_eyes_open(open_)
         cfg.set("eyes_open", open_)
@@ -59,9 +89,66 @@ def main() -> int:
             observer.start()
         else:
             observer.stop()
+        now = time.monotonic()
+        _eye_toggles.append(now)
+        _eye_toggles[:] = [
+            t for t in _eye_toggles if now - t <= EYE_TOGGLE_WINDOW_S
+        ]
+        if len(_eye_toggles) >= EYE_TOGGLE_THRESHOLD:
+            _eye_toggles.clear()
+            trigger_annoyed()
 
     def toggle_eyes() -> None:
         apply_eyes(not pet.eyes_open)
+
+    def trigger_annoyed() -> None:
+        """被反复拨弄：烦躁脸 + 「到底要怎样啦！」（有冷却防刷）。"""
+        nonlocal _annoy_until
+        now = time.monotonic()
+        if now < _annoy_until:
+            return
+        _annoy_until = now + ANNOY_COOLDOWN_S
+        bubble.show_comment(ANNOY_LINE, 4000)
+        bubble.anchor_above(pet.geometry().center(), pet.screen())
+        expressions.show_annoyed(2800)
+        play_sound("annoyed")
+
+    def on_poke() -> None:
+        """长按戳它：清醒就撒娇，闭眼就嘟囔睡话（有冷却）。"""
+        nonlocal _poke_until
+        now = time.monotonic()
+        if now < _poke_until:
+            return
+        _poke_until = now + POKE_COOLDOWN_S
+        bubble.show_comment(
+            random.choice(POKE_LINES if pet.eyes_open else SLEEPY_POKE_LINES),
+            3000,
+        )
+        bubble.anchor_above(pet.geometry().center(), pet.screen())
+        if pet.eyes_open:
+            expressions.show(Expression.HAPPY, 1800)
+            play_sound("happy")
+
+    def action_talk_now() -> None:
+        """再说一句：能截屏就立刻截屏吐槽，否则本地来一句。"""
+        if not observer.observe_now():
+            bubble.show_comment(random.choice(TALK_NOW_LINES), 3000)
+            bubble.anchor_above(pet.geometry().center(), pet.screen())
+            if pet.eyes_open:
+                expressions.show(Expression.PUZZLED, 1500)
+
+    def show_comment(text: str, emotion: str, archive: bool) -> None:
+        bubble.show_comment(text)
+        bubble.anchor_above(pet.geometry().center(), pet.screen())
+        expr = EXPR_BY_NAME.get(emotion, Expression.NORMAL)
+        expressions.show(expr, 2500)
+        play_sound(emotion)
+        if archive:
+            dialog.chat_view.append_taunt(text)
+
+    def on_bubble_reply(text: str) -> None:
+        dialog.open_dialog(PAGE_CHAT)
+        dialog.begin_quoted_reply(text)
 
     # --- 宠物窗口 ---
     pet.clicked.connect(lambda: dialog.open_dialog(PAGE_CHAT))
@@ -69,6 +156,9 @@ def main() -> int:
     pet.settings_requested.connect(lambda: dialog.open_dialog(PAGE_SETTINGS))
     pet.exit_requested.connect(app.quit)
     pet.toggle_eyes_requested.connect(toggle_eyes)
+    pet.talk_requested.connect(action_talk_now)
+    pet.poke.connect(on_poke)
+    pet.shaken.connect(trigger_annoyed)
 
     # --- 对话框 ---
     dialog.eyes_toggled.connect(apply_eyes)
@@ -83,14 +173,12 @@ def main() -> int:
     dialog.settings_saved.connect(on_settings_saved)
 
     def show_bubble(text: str, emotion: str) -> None:
-        bubble.show_comment(text)
-        bubble.anchor_above(pet.geometry().center(), pet.screen())
-        expr = EXPR_BY_NAME.get(emotion, Expression.NORMAL)
-        expressions.show(expr, 2500)
-        play_sound(emotion)
+        show_comment(text, emotion, archive=True)
 
     observer.comment_ready.connect(show_bubble)
-    observer.fallback_ready.connect(show_bubble)
+    observer.fallback_ready.connect(
+        lambda text, emotion: show_comment(text, emotion, archive=False)
+    )
 
     def on_assistant_reply(text: str, emotion: str) -> None:
         expr = EXPR_BY_NAME.get(emotion, Expression.NORMAL)
@@ -98,6 +186,10 @@ def main() -> int:
         play_sound(emotion)
 
     dialog.assistant_replied.connect(on_assistant_reply)
+
+    bubble.reply_requested.connect(on_bubble_reply)
+
+    expressions.start_blinking()
 
     if cfg.get("eyes_open", True):
         observer.start()
@@ -108,6 +200,7 @@ def main() -> int:
     tray.setToolTip("Rant机")
     tray_menu = QMenu()
     act_chat = QAction("对话", tray_menu)
+    act_talk = QAction("再说一句", tray_menu)
     act_settings = QAction("设置", tray_menu)
     act_eyes = QAction("", tray_menu)
     act_exit = QAction("退出", tray_menu)
@@ -117,10 +210,12 @@ def main() -> int:
 
     refresh_eyes_label()
     act_chat.triggered.connect(lambda: dialog.open_dialog(PAGE_CHAT))
+    act_talk.triggered.connect(action_talk_now)
     act_settings.triggered.connect(lambda: dialog.open_dialog(PAGE_SETTINGS))
     act_eyes.triggered.connect(toggle_eyes)
     act_exit.triggered.connect(app.quit)
     tray_menu.addAction(act_chat)
+    tray_menu.addAction(act_talk)
     tray_menu.addAction(act_settings)
     tray_menu.addAction(act_eyes)
     tray_menu.addSeparator()
